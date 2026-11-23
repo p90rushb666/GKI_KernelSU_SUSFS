@@ -237,13 +237,13 @@ runs:
         import re, sys
         p = sys.argv[1]
         t = open(p, encoding="utf-8").read()
-        if t.count("ksu_init_hook_transaction_ops_write();") >= 1:
+        if re.search(r"ksu_init_hook_transaction_ops_write\(\);\s*\n\s*ksu_init_slow_avc_audit_hook\(\);", t):
             print("already patched")
             raise SystemExit(0)
-        new = re.sub(r"(?m)^([ \t]*)ksu_init_slow_avc_audit_hook\(\);",
-                     r"\1ksu_init_hook_transaction_ops_write();\n\1ksu_init_slow_avc_audit_hook();",
-                     t, count=1)
-        if new == t:
+        new, n = re.subn(r"(?m)^([ \t]*)ksu_init_slow_avc_audit_hook\(\);",
+                         r"\1ksu_init_hook_transaction_ops_write();\n\1ksu_init_slow_avc_audit_hook();",
+                         t, count=1)
+        if n != 1:
             print("anchor not found; leaving as-is")
             raise SystemExit(0)
         open(p, "w", encoding="utf-8").write(new)
