@@ -71,6 +71,13 @@ def main() -> None:
     except OSError as exc:
         fail(f"cannot read {path}: {exc}")
 
+    if not any(TABLE_START_RE.search(ln) for ln in lines):
+        print(
+            "SukiSU manager table not present in this checkout "
+            "(dynamic manager certificate path); nothing to trim"
+        )
+        return
+
     start, end = table_bounds(lines, "pre-write")
     rows = [i for i in range(start + 1, end) if ROW_RE.match(lines[i])]
     if len(rows) != EXPECTED_ROWS:
