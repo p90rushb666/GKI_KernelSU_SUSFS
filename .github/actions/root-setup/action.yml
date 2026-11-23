@@ -36,7 +36,7 @@ runs:
             manager="BakaSU Manager"
             ;;
           sukisu-ultra)
-            repo="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
+            repo="https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git"
             directory="SukiSU-Ultra"
             manager="SukiSU-Ultra Manager"
             ;;
