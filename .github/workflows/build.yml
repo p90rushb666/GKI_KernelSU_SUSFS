@@ -480,6 +480,44 @@ jobs:
           version: ${{ inputs.version }}
           date: ${{ inputs.os_patch_level }}
 
+      - name: Inject KernelPatch for KPM
+        # SukiSU's KPM is only a bridge: the loader itself lives in KernelPatch
+        # (kpimg), reached through the __arm64_sys_truncate supercall. A build
+        # with CONFIG_KPM=y but no kpimg reports NOT_SUPPORTED at runtime, so
+        # embed kpimg into the Image before AnyKernel3 is uploaded.
+        if: inputs.root_flavor == 'sukisu-ultra'
+        shell: bash
+        env:
+          KP_VERSION: '0.14.0'
+          KP_SRC: 'https://git.zako.shirkneko.top:20004/shirkneko/SukiSU_KernelPatch_patch/releases/download/0.14.0'
+          KPIMG_SHA256: 'ab020f31ca1c058603917e46d8a6691fbce0dd5cdc135a9cd8dc780e89472716'
+          KPTOOLS_SHA256: 'a6b912ca964d35427d7fbcd87273abac604970e9746fa0613362be971f07259d'
+          KP_SUPERKEY: ${{ secrets.KP_SUPERKEY || 'K80pro-Nova-KPM-2026-8f3a91c4d5e6b7a2' }}
+        run: |
+          set -euo pipefail
+          IMG="${{ github.workspace }}/AnyKernel3/Image"
+          [ -f "$IMG" ] || { echo "::error title=kernelpatch::Image not found at $IMG"; exit 1; }
+          TMP="$(mktemp -d)"
+          curl -fsSL --retry 5 --retry-delay 5 -o "$TMP/kpimg" "$KP_SRC/kpimg"
+          curl -fsSL --retry 5 --retry-delay 5 -o "$TMP/kptools" "$KP_SRC/kptools-linux"
+          echo "$KPIMG_SHA256  $TMP/kpimg" | sha256sum -c -
+          echo "$KPTOOLS_SHA256  $TMP/kptools" | sha256sum -c -
+          chmod +x "$TMP/kptools"
+          before=$(stat -c%s "$IMG")
+          "$TMP/kptools" -p -i "$IMG" -k "$TMP/kpimg" -s "$KP_SUPERKEY" -o "$IMG.kp"
+          mv -f "$IMG.kp" "$IMG"
+          after=$(stat -c%s "$IMG")
+          echo "Image: $before -> $after bytes"
+          "$TMP/kptools" -l -i "$IMG" | tee "$TMP/info.txt"
+          grep -q '^patched=true' "$TMP/info.txt" || { echo "::error title=kernelpatch::patch did not stick"; exit 1; }
+          mkdir -p "${{ github.workspace }}/build-reports"
+          {
+            echo "KernelPatch (KPM) injection"
+            echo "kp_version: $KP_VERSION"
+            echo "image_bytes: $before -> $after"
+            cat "$TMP/info.txt"
+          } > "${{ github.workspace }}/build-reports/kernelpatch.txt"
+
       - name: Extract the built .config
         if: always()
         uses: ./.github/actions/extract-the-built-config
