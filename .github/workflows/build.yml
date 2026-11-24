@@ -169,6 +169,14 @@ jobs:
 
       - name: Initialize Config Fragment
         uses: ./.github/actions/initialize-config-fragment
+      - name: Enable KPM for SukiSU-Ultra
+        if: inputs.root_flavor == 'sukisu-ultra'
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel/common
+        run: |
+          python3 "${{ github.workspace }}/.github/scripts/append_fragment.py" \
+            "${{ github.workspace }}/.github/fragments/enable-kpm-for-sukisu-ultra.fragment" \
+            --dest wild_defconfig.fragment --label enable-kpm-for-sukisu-ultra
       - name: Spoof /proc/config.gz With Stock Config
         uses: ./.github/actions/stock-config
         with:
@@ -290,6 +298,17 @@ jobs:
       - name: Baseband Guard
         if: (contains(inputs.feature_set, 'BBG') || inputs.feature_set == 'All')
         uses: ./.github/actions/bbg
+      - name: BBG retry su/ksu sid resolution
+        if: contains(inputs.feature_set, 'BBG') || inputs.feature_set == 'All'
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel
+        run: |
+          set -euo pipefail
+          F="common/security/baseband-guard/tracing/tracing.c"
+          if [ ! -f "$F" ]; then echo "ERROR: $F not found" >&2; exit 1; fi
+          sed -i -E 's/(su_sid|magisk_sid|ksu_sid) = -EINVAL;/\1 = -1;/' "$F"
+          echo "--- sid init after patch ---"
+          grep -nE '(su_sid|magisk_sid|ksu_sid) = -1;' "$F"
 
       - name: Setup Networking
         if: contains(inputs.feature_set, 'NET') || inputs.feature_set == 'All'
