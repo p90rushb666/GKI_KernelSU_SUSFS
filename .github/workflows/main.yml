@@ -260,7 +260,7 @@ jobs:
           # itself and calls the susfs_def.h no_su API -> OK on tips. Note the
           # repo's default branch (main, b8bd4b6c) is used only for SUSFS-off
           # builds, which resolve it at run time rather than from this pin.
-          PIN_SUKISU_ULTRA="cde5ddcbacea1e60d239068786c630e59a007cee"
+          PIN_SUKISU_ULTRA="d8aafb76eeef070dad2dc39161ddf922545fce90"
           # FinaSU: susfs-integrated fork of the tiann restructure; pin tracks
           # the susfs4ksu v2.3 ABI era its supercall dispatch is written against.
           # master tip 06d71e8a (2026-11-16).
