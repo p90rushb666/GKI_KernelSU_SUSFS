@@ -228,6 +228,20 @@ jobs:
           flavor: ${{ inputs.root_flavor }}
           commit: ${{ inputs.root_commit }}
 
+      - name: Match stock selinuxfs semantics in SukiSU hook
+        # Shipped hook returns before the selinuxfs transaction is armed and
+        # matches hidden tokens past the first NUL. Both are visible to placebo
+        # probes; make the hook indistinguishable from stock on those axes while
+        # still rejecting hidden contexts.
+        if: inputs.root_flavor == 'sukisu-ultra'
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel
+        run: |
+          set -euo pipefail
+          python3 "${{ github.workspace }}/.github/scripts/selinux_hook_stock_fidelity.py" --src SukiSU-Ultra
+          grep -n "limit = strnlen(str, limit);" SukiSU-Ultra/kernel/feature/selinux_hide.h
+          grep -n "selinux_transaction_write_fn(file, buf, size, pos);" SukiSU-Ultra/kernel/feature/selinux_hide.c
+
       - name: Mark No Root build metadata
         if: inputs.root_flavor == 'none'
         uses: ./.github/actions/mark-no-root-build-metadata
