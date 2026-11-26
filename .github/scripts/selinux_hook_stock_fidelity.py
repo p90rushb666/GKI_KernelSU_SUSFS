@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """Make SukiSU's SELinux-hide hook behave like stock selinuxfs.
 
-Problem (DuckDetector 2026.11.25, "xxksu SELinuxFS transaction-state anomaly"):
-  the hook returned -EINVAL *before* the transaction was armed, and it matched
-  hidden-type tokens over the raw write size instead of the NUL-terminated
-  fields that sscanf() would consume. Both are observable with placebo probes.
+DuckDetector 2026.11.25 flagged two implementation fingerprints:
+  A. same-FD: the hook returned -EINVAL before the transaction was armed, so a
+     second write on the same fd succeeded; stock always burns the fd first.
+  B. /access tail: hidden-type tokens in bytes the stock parser ignores (past
+     the first NUL, or in a 4th field after the class) still reached the
+     matcher, so ":ksu:" returned EINVAL while ":inv:" returned a decision.
 
-Fix (two surgical edits, no behaviour change for legitimate requests):
-  1. selinux_hide.h  : bound the matcher to the first NUL (stock parser view).
-  2. selinux_hide.c  : on a hidden hit, run the real transaction first so the
-                       fd is consumed exactly like stock's parse-failure path,
-                       then report EINVAL.
+Three surgical edits, no behaviour change for legitimate requests:
+  1. selinux_hide.h        : NUL-bound the matcher + add an /access field view.
+  2. selinux_hide.c        : consume the transaction before reporting EINVAL.
+  3. selinux_hide_arm64.c  : same /access field view on the primary hook.
 
 Usage:
   python3 selinux_hook_stock_fidelity.py --src <SukiSU checkout>
-  python3 selinux_hook_stock_fidelity.py --file selinux_hide.c --file selinux_hide.h
 Exit code is non-zero when an anchor is missing, so CI fails loudly instead of
-silently shipping an unhooked kernel.
+quietly shipping an unpatched kernel.
 """
 
 from __future__ import annotations
@@ -25,16 +25,40 @@ import argparse
 import pathlib
 import sys
 
-OOM = object()
-
 # ---------------------------------------------------------------- edit 1 ----
-HDR_ANCHOR = """static __always_inline bool ksu_should_destroy_context(char *str, size_t limit, const bool types_only)
+HDR_FUNC = "static __always_inline bool ksu_should_destroy_context(char *str, size_t limit, const bool types_only)"
+
+HDR_HELPER = """/*
+ * /access is parsed by sscanf(\"%s %s %u\"): only the source and target fields
+ * carry contexts, the class is numeric and everything behind it is discarded
+ * by the stock parser. Clamp the scanner to the end of the target field so an
+ * extra field (or a tail glued onto the class) cannot smuggle a hidden-type
+ * token into the matcher.
+ */
+static __always_inline size_t ksu_selinux_access_view_len(const char *str, size_t limit)
+{
+\tsize_t i, seps = 0;
+
+\tif (!str)
+\t\treturn 0;
+\tfor (i = 0; i < limit; i++) {
+\t\tif (str[i] == ' ' || str[i] == '\\t' || str[i] == '\\n') {
+\t\t\tif (++seps == 2)
+\t\t\t\treturn i;
+\t\t}
+\t}
+\treturn limit;
+}
+
+"""
+
+HDR_CLAMP_ANCHOR = """static __always_inline bool ksu_should_destroy_context(char *str, size_t limit, const bool types_only)
 {
 \tif (!str)
 \t\treturn false;
 """
 
-HDR_PATCHED = HDR_ANCHOR + """
+HDR_CLAMP = HDR_CLAMP_ANCHOR + """
 \t/*
 \t * Stock selinuxfs parses with sscanf(\"%s %s %s\"): everything after the
 \t * first NUL is dead. Scanning the raw length let a NUL-separated tail
@@ -45,10 +69,12 @@ HDR_PATCHED = HDR_ANCHOR + """
 \tlimit = strnlen(str, limit);
 """
 
-HDR_MARK = "limit = strnlen(str, limit);"
+HDR_MARK_HELPER = "ksu_selinux_access_view_len(const char *str, size_t limit)"
+HDR_MARK_CLAMP = "limit = strnlen(str, limit);"
 
 # ---------------------------------------------------------------- edit 2 ----
-SRC_ANCHOR = """\tif (ksu_should_destroy_context(kbuf, len, false)) {
+SRC_BODY_ANCHOR = """\tkbuf[len] = '\\0';
+\tif (ksu_should_destroy_context(kbuf, len, false)) {
 \t\tpr_info_ratelimited("selinux_hide: selinux_transaction_write: destroy: %s \\n", kbuf);
 \t\t// buf = (const char __user *)current->mm->start_stack;
 \t\tdo_useless_alloc(len);
@@ -56,7 +82,14 @@ SRC_ANCHOR = """\tif (ksu_should_destroy_context(kbuf, len, false)) {
 \t}
 """
 
-SRC_PATCHED = """\tif (ksu_should_destroy_context(kbuf, len, false)) {
+SRC_BODY = """\tkbuf[len] = '\\0';
+\t/*
+\t * /access only carries contexts in the first two fields; /context is a
+\t * single string. Give the matcher the same view the stock parser uses.
+\t */
+\tsize_t view = (ino == SEL_ACCESS)
+\t\t? ksu_selinux_access_view_len(kbuf, len) : len;
+\tif (ksu_should_destroy_context(kbuf, view, false)) {
 \t\tpr_info_ratelimited("selinux_hide: selinux_transaction_write: destroy: %s \\n", kbuf);
 \t\t/*
 \t\t * Stock always runs simple_transaction_get() before it parses, so a
@@ -80,68 +113,74 @@ SRC_PATCHED = """\tif (ksu_should_destroy_context(kbuf, len, false)) {
 \t}
 """
 
-SRC_MARK = "selinux_transaction_write_fn(file, buf, size, pos);\n\t\tif (tx < 0)"
+SRC_MARK_BODY = "ssize_t tx = selinux_transaction_write_fn(file, buf, size, pos);"
 
-DROP_NOISE_ANCHOR = """\tif (ksu_should_destroy_context(kbuf, len, false)) {
-\t\tpr_info_ratelimited("selinux_hide: selinux_transaction_write: destroy: %s \\n", kbuf);
-\t\t// buf = (const char __user *)current->mm->start_stack;
-\t\tdo_useless_alloc(len);
-\t\treturn -EINVAL;
-"""
-
-
-def patch_header(text: str) -> tuple[str, str]:
-    if HDR_MARK in text:
-        return text, "already patched"
-    if HDR_ANCHOR not in text:
-        raise SystemExit("ERROR: selinux_hide.h anchor not found -- upstream layout changed")
-    return text.replace(HDR_ANCHOR, HDR_PATCHED, 1), "patched (NUL-bounded matcher)"
+# ---------------------------------------------------------------- edit 3 ----
+ARM_ANCHOR = "\tif (ino == SEL_ACCESS && ksu_should_destroy_context(data, size, false)) {"
+ARM_PATCHED = """\tif (ino == SEL_ACCESS &&
+\t    ksu_should_destroy_context(data, ksu_selinux_access_view_len(data, size), false)) {"""
+ARM_MARK = "ksu_selinux_access_view_len(data, size)"
 
 
-def patch_source(text: str) -> tuple[str, str]:
-    if SRC_MARK in text:
-        return text, "already patched"
-    if SRC_ANCHOR not in text:
-        raise SystemExit("ERROR: selinux_hide.c anchor not found -- upstream layout changed")
-    return text.replace(SRC_ANCHOR, SRC_PATCHED, 1), "patched (consume-then-EINVAL)"
+def patch_header(text: str) -> tuple[str, list[str]]:
+    notes = []
+    if HDR_MARK_HELPER not in text:
+        if HDR_FUNC not in text:
+            raise SystemExit("ERROR: selinux_hide.h helper anchor not found")
+        text = text.replace(HDR_FUNC, HDR_HELPER + HDR_FUNC, 1)
+        notes.append("helper added")
+    if HDR_MARK_CLAMP not in text:
+        if HDR_CLAMP_ANCHOR not in text:
+            raise SystemExit("ERROR: selinux_hide.h clamp anchor not found")
+        text = text.replace(HDR_CLAMP_ANCHOR, HDR_CLAMP, 1)
+        notes.append("NUL-bounded matcher")
+    return text, notes or ["already patched"]
 
 
-def resolve(args) -> list[pathlib.Path]:
-    if args.file:
-        return [pathlib.Path(p) for p in args.file]
-    root = pathlib.Path(args.src) / "kernel" / "feature"
-    return [root / "selinux_hide.c", root / "selinux_hide.h"]
+def patch_source(text: str) -> tuple[str, list[str]]:
+    notes = []
+    if SRC_MARK_BODY not in text:
+        if SRC_BODY_ANCHOR not in text:
+            raise SystemExit("ERROR: selinux_hide.c body anchor not found")
+        text = text.replace(SRC_BODY_ANCHOR, SRC_BODY, 1)
+        notes.append("consume-then-EINVAL")
+    return text, notes or ["already patched"]
+
+
+def patch_arm64(text: str) -> tuple[str, list[str]]:
+    if ARM_MARK in text:
+        return text, ["already patched"]
+    if ARM_ANCHOR not in text:
+        raise SystemExit("ERROR: selinux_hide_arm64.c anchor not found")
+    return text.replace(ARM_ANCHOR, ARM_PATCHED, 1), ["/access field view"]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", help="SukiSU checkout root")
-    ap.add_argument("--file", action="append", help="explicit source file (repeatable)")
-    ap.add_argument("--check", action="store_true", help="only verify anchors; do not write")
+    ap.add_argument("--src", required=True, help="SukiSU checkout root")
+    ap.add_argument("--check", action="store_true", help="verify anchors only")
     a = ap.parse_args()
-    if not a.src and not a.file:
-        ap.error("give --src or --file")
 
-    files = resolve(a)
-    rc = 0
-    for path in files:
+    root = pathlib.Path(a.src) / "kernel" / "feature"
+    jobs = {
+        "selinux_hide.h": patch_header,
+        "selinux_hide.c": patch_source,
+        "selinux_hide_arm64.c": patch_arm64,
+    }
+    for name, fn in jobs.items():
+        path = root / name
         if not path.is_file():
             print(f"ERROR: missing {path}")
             return 1
         original = path.read_text(encoding="utf-8", newline="")
-        if path.name == "selinux_hide.h":
-            new, note = patch_header(original)
-        elif path.name == "selinux_hide.c":
-            new, note = patch_source(original)
-        else:
-            continue
-        print(f"{path.name}: {note}")
+        new, notes = fn(original)
+        print(f"{name}: {', '.join(notes)}")
         if not a.check and new != original:
             # newline="" keeps the checkout's LF endings; text mode on Windows
             # would rewrite the whole file as CRLF and bloat the diff.
             with open(path, "w", encoding="utf-8", newline="") as fh:
                 fh.write(new)
-    return rc
+    return 0
 
 
 if __name__ == "__main__":
