@@ -502,10 +502,13 @@ jobs:
         if: inputs.root_flavor == 'sukisu-ultra'
         shell: bash
         env:
-          KP_VERSION: '0.14.0'
-          KP_SRC: 'https://git.zako.shirkneko.top:20004/shirkneko/SukiSU_KernelPatch_patch/releases/download/0.14.0'
-          KPIMG_SHA256: 'ab020f31ca1c058603917e46d8a6691fbce0dd5cdc135a9cd8dc780e89472716'
-          KPTOOLS_SHA256: 'a6b912ca964d35427d7fbcd87273abac604970e9746fa0613362be971f07259d'
+          # The 0.14.0 release was deleted upstream; kpm-ci carries the same
+          # build plus the per-kernel .ko set. It is a rolling tag, so the
+          # hashes below are the only thing keeping the build reproducible.
+          KP_VERSION: 'kpm-ci#30'
+          KP_SRC: 'https://git.zako.shirkneko.top:20004/shirkneko/SukiSU_KernelPatch_patch/releases/download/kpm-ci'
+          KPIMG_SHA256: '17628747cb6d6f5f8fe70f5cfa733f5089ae090688643f2917357e661ce3c45c'
+          KPTOOLS_SHA256: 'cdd72abca369b8050488ee0ab566e6320cf5f67fc4fa75614c25de47a95dfe41'
           KP_SUPERKEY: ${{ secrets.KP_SUPERKEY || 'K80pro-Nova-KPM-2026-8f3a91c4d5e6b7a2' }}
         run: |
           set -euo pipefail
