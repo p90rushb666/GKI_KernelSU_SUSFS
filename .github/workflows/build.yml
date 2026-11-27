@@ -228,6 +228,19 @@ jobs:
           flavor: ${{ inputs.root_flavor }}
           commit: ${{ inputs.root_commit }}
 
+      - name: Equalise hidden-context timing
+        # Hidden contexts used to bail out before SELinux parsed them, which made
+        # them measurably faster than genuinely unknown contexts (DirtySepolicy
+        # timing probe). Replay the stock parse+lookup cost before rejecting.
+        if: inputs.root_flavor == 'sukisu-ultra'
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel
+        run: |
+          set -euo pipefail
+          python3 "${{ github.workspace }}/.github/scripts/ksu_selinux_timing_parity.py" --src SukiSU-Ultra
+          grep -q "ksu_replay_unknown_context(str, (u32)size);" SukiSU-Ultra/kernel/feature/selinux_hide.c
+          grep -q "void ksu_replay_unknown_context" SukiSU-Ultra/kernel/feature/selinux_hide_arm64.c
+
       - name: Mark No Root build metadata
         if: inputs.root_flavor == 'none'
         uses: ./.github/actions/mark-no-root-build-metadata
