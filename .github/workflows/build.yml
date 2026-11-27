@@ -238,8 +238,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 "${{ github.workspace }}/.github/scripts/ksu_selinux_timing_parity.py" --src SukiSU-Ultra
+          python3 "${{ github.workspace }}/.github/scripts/ksu_selinux_seqno_timing.py" --src SukiSU-Ultra
           grep -q "ksu_replay_unknown_context(str, (u32)size);" SukiSU-Ultra/kernel/feature/selinux_hide.c
           grep -q "void ksu_replay_unknown_context" SukiSU-Ultra/kernel/feature/selinux_hide_arm64.c
+          grep -q "ksu_install_access_seqno_hook();" SukiSU-Ultra/kernel/feature/selinux_hide.c
+          grep -q "kallsyms_lookup_retry(\"security_context_to_sid_core\")" SukiSU-Ultra/kernel/feature/selinux_hide_arm64.c
 
       - name: Mark No Root build metadata
         if: inputs.root_flavor == 'none'
