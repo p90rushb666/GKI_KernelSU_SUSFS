@@ -525,7 +525,10 @@ jobs:
           mv -f "$IMG.kp" "$IMG"
           after=$(stat -c%s "$IMG")
           echo "Image: $before -> $after bytes"
-          "$TMP/kptools" -l -i "$IMG" | tee "$TMP/info.txt"
+          # kptools >= kpm-ci prints the superkey in -l; keep it out of public logs.
+          "$TMP/kptools" -l -i "$IMG" \
+            | sed -E 's/^(superkey|root_superkey)=.*/\1=<redacted>/' \
+            | tee "$TMP/info.txt"
           grep -q '^patched=true' "$TMP/info.txt" || { echo "::error title=kernelpatch::patch did not stick"; exit 1; }
           mkdir -p "${{ github.workspace }}/build-reports"
           {
