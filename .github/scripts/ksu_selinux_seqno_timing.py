@@ -121,10 +121,11 @@ def patch_arm(p: pathlib.Path) -> None:
         raise SystemExit("ERROR: replay helper anchor not found in selinux_hide_arm64.c")
     t = t.replace(REPLAY_NULL, REPLAY_LAZY, 1)
 
-    tail = "#endif // ARM64 && KALLSYMS"
+    # must stay above the #undef lines, otherwise the branch-patch macro is gone
+    tail = "#undef patch_arm64_branches_trampolined"
     i = t.rfind(tail)
     if i == -1:
-        raise SystemExit("ERROR: arm64 tail marker not found")
+        raise SystemExit("ERROR: arm64 #undef marker not found")
     t = t[:i] + SEQNO_HOOK + "\n" + t[i:]
     t = t.rstrip("\n") + "\n" + SEQNO_STUB
     p.write_text(t, encoding="utf-8", newline="")
