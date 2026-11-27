@@ -237,9 +237,9 @@ jobs:
         working-directory: ${{ github.workspace }}/kernel
         run: |
           set -euo pipefail
-          python3 "${{ github.workspace }}/.github/scripts/ksu_selinux_seqno_zero.py" --src SukiSU-Ultra
+          python3 "${{ github.workspace }}/.github/scripts/ksu_selinux_seqno_fops.py" --src SukiSU-Ultra
           grep -q "ksu_install_access_seqno_hook();" SukiSU-Ultra/kernel/feature/selinux_hide.c
-          grep -q "avd->seqno = 0;" SukiSU-Ultra/kernel/feature/selinux_hide_arm64.c
+          grep -q "KSU_SELINUX_FAKE_SEQNO 0" SukiSU-Ultra/kernel/feature/selinux_hide.h
       - name: Mark No Root build metadata
         if: inputs.root_flavor == 'none'
         uses: ./.github/actions/mark-no-root-build-metadata
