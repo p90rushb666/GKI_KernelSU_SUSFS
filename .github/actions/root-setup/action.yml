@@ -225,27 +225,3 @@ runs:
           echo "No susfs_compat gate present; nothing to do"
         fi
 
-    - name: Force KSU access-sequence hook under SUSFS
-      if: inputs.flavor == 'sukisu-ultra'
-      shell: bash
-      working-directory: ${{ github.workspace }}/kernel
-      run: |
-        set -euo pipefail
-        F="SukiSU-Ultra/kernel/feature/selinux_hide.c"
-        if [ ! -f "$F" ]; then echo "no $F"; exit 0; fi
-        python3 - "$F" <<'PY'
-        import re, sys
-        p = sys.argv[1]
-        t = open(p, encoding="utf-8").read()
-        if re.search(r"ksu_init_hook_transaction_ops_write\(\);\s*\n\s*ksu_init_slow_avc_audit_hook\(\);", t):
-            print("already patched")
-            raise SystemExit(0)
-        new, n = re.subn(r"(?m)^([ \t]*)ksu_init_slow_avc_audit_hook\(\);",
-                         r"\1ksu_init_hook_transaction_ops_write();\n\1ksu_init_slow_avc_audit_hook();",
-                         t, count=1)
-        if n != 1:
-            print("anchor not found; leaving as-is")
-            raise SystemExit(0)
-        open(p, "w", encoding="utf-8").write(new)
-        print("patched: access hook forced for SUSFS builds")
-        PY
