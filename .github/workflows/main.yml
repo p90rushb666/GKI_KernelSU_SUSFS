@@ -256,7 +256,7 @@ jobs:
           # 14-6.1) fs patches reference `fake_state` and will fail to link with
           # latest BakaSU; 6.6/6.12/6.18 are unaffected. Watch those 5 families.
           PIN_BAKASU="7b65bde0710b5e7c6f755545cb15a4abd417f3a8"
-          # SukiSU-Ultra: builtin tip (4bec532d, 2026-11-16); defines fake_state
+          # SukiSU-Ultra: builtin tip (844782f, 2026-11-28); upstream renamed builtin-new -> builtin
           # itself and calls the susfs_def.h no_su API -> OK on tips. Note the
           # repo's default branch (main, b8bd4b6c) is used only for SUSFS-off
           # builds, which resolve it at run time rather than from this pin.
@@ -360,7 +360,7 @@ jobs:
           if [ "$SCHED_SUSFS" = "true" ]; then
             KERNELSU_COMMIT="$(pick "$PIN_KERNELSU" https://github.com/tiann/KernelSU.git refs/heads/main)"
             BAKASU_COMMIT="$(pick "$PIN_BAKASU" https://github.com/Baka-SU/BakaSU.git refs/heads/main)"
-            SUKISU_ULTRA_COMMIT="$(pick "$PIN_SUKISU_ULTRA" https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git refs/heads/builtin-new)"
+            SUKISU_ULTRA_COMMIT="$(pick "$PIN_SUKISU_ULTRA" https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git refs/heads/builtin)"
             FINASU_COMMIT="$(pick "$PIN_FINASU" https://github.com/LyraVoid/FinaSU.git refs/heads/master)"
           else
             KERNELSU_COMMIT="$(resolve_sha https://github.com/tiann/KernelSU.git refs/heads/main)"
